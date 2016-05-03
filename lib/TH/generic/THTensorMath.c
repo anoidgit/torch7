@@ -398,8 +398,10 @@ real THTensor_(minall)(THTensor *tensor)
                   if(!(value >= theMin))
                   {
                     theMin = value;
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
                     if (isnan(value))
                       break;
+#endif
                   });
   return theMin;
 }
@@ -417,8 +419,10 @@ real THTensor_(maxall)(THTensor *tensor)
                   if(!(value <= theMax))
                   {
                     theMax = value;
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
                     if (isnan(value))
                       break;
+#endif
                   });
   return theMax;
 }
@@ -490,7 +494,7 @@ void THTensor_(div)(THTensor *r_, THTensor *t, real value)
   }
 }
 
-void THTensor_(mod)(THTensor *r_, THTensor *t, real value)
+void THTensor_(fmod)(THTensor *r_, THTensor *t, real value)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
@@ -503,6 +507,22 @@ void THTensor_(mod)(THTensor *r_, THTensor *t, real value)
           rp[i] = fmod(tp[i], value);
   } else {
       TH_TENSOR_APPLY2(real, r_, real, t, *r__data = fmod(*t_data, value););
+  }
+}
+
+void THTensor_(remainder)(THTensor *r_, THTensor *t, real value)
+{
+  THTensor_(resizeAs)(r_, t);
+  if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(nElement)(r_) == THTensor_(nElement)(t)) {
+      real *tp = THTensor_(data)(t);
+      real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
+      long i;
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
+          rp[i] = (value == 0)? NAN : tp[i] - value * floor(tp[i] / value);
+  } else {
+      TH_TENSOR_APPLY2(real, r_, real, t, *r__data = (value == 0)? NAN : *t_data - value * floor(*t_data / value););
   }
 }
 
@@ -600,7 +620,7 @@ void THTensor_(cdiv)(THTensor *r_, THTensor *t, THTensor *src)
   }
 }
 
-void THTensor_(cmod)(THTensor *r_, THTensor *t, THTensor *src)
+void THTensor_(cfmod)(THTensor *r_, THTensor *t, THTensor *src)
 {
   THTensor_(resizeAs)(r_, t);
   if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(isContiguous)(src) && THTensor_(nElement)(r_) == THTensor_(nElement)(src)) {
@@ -614,6 +634,23 @@ void THTensor_(cmod)(THTensor *r_, THTensor *t, THTensor *src)
         rp[i] = fmod(tp[i], sp[i]);
   } else {
       TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = fmod(*t_data, *src_data););
+  }
+}
+
+void THTensor_(cremainder)(THTensor *r_, THTensor *t, THTensor *src)
+{
+  THTensor_(resizeAs)(r_, t);
+  if (THTensor_(isContiguous)(r_) && THTensor_(isContiguous)(t) && THTensor_(isContiguous)(src) && THTensor_(nElement)(r_) == THTensor_(nElement)(src)) {
+      real *tp = THTensor_(data)(t);
+      real *sp = THTensor_(data)(src);
+      real *rp = THTensor_(data)(r_);
+      long sz = THTensor_(nElement)(t);
+      long i;
+      #pragma omp parallel for if(sz > TH_OMP_OVERHEAD_THRESHOLD) private(i)
+      for (i=0; i<sz; i++)
+          rp[i] = (sp[i] == 0)? NAN : tp[i] - sp[i] * floor(tp[i] / sp[i]);
+  } else {
+      TH_TENSOR_APPLY3(real, r_, real, t, real, src, *r__data = (*src_data == 0)? NAN : *t_data - *src_data * floor(*t_data / *src_data););
   }
 }
 
@@ -1041,8 +1078,10 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                          {
                            theIndex = i;
                            theMax = value;
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
                            if (isnan(value))
                              break;
+#endif
                          }
                        }
                        *indices__data = theIndex;
@@ -1078,8 +1117,10 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                          {
                            theIndex = i;
                            theMin = value;
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
                            if (isnan(value))
                              break;
+#endif
                          }
                        }
                        *indices__data = theIndex;
@@ -1362,9 +1403,11 @@ void THTensor_(range)(THTensor *r_, accreal xmin, accreal xmax, accreal step)
   THArgCheck(((step > 0) && (xmax >= xmin)) || ((step < 0) && (xmax <= xmin))
               , 2, "upper bound and larger bound incoherent with step sign");
 
-  size = (long)((xmax/step - xmin/step)+1);
+  size = (long) (((xmax - xmin) / step) + 1);
 
-  THTensor_(resize1d)(r_, size);
+  if (THTensor_(nElement)(r_) != size) {
+    THTensor_(resize1d)(r_, size);
+  }
 
   TH_TENSOR_APPLY(real, r_, *r__data = xmin + (i++)*step;);
 }
@@ -1995,6 +2038,31 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   }
 }
 
+int THTensor_(equal)(THTensor *ta, THTensor* tb)
+{
+  int equal = 1;
+  if(!THTensor_(isSameSizeAs)(ta, tb))
+    return 0;
+
+  if (THTensor_(isContiguous)(ta) && THTensor_(isContiguous)(tb)) {
+    real *tap = THTensor_(data)(ta);
+    real *tbp = THTensor_(data)(tb);
+    long sz = THTensor_(nElement)(ta);
+    long i;
+    for (i=0; i<sz; ++i){
+      if(tap[i] != tbp[i]) return 0;
+    }
+  } else {
+    // Short-circuit the apply function on inequality
+    TH_TENSOR_APPLY2(real, ta, real, tb,
+                     if (equal && *ta_data != *tb_data) {
+                        equal = 0;
+                        TH_TENSOR_APPLY_hasFinished = 1; break;
+                     })
+  }
+  return equal;
+}
+
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
   {									\
@@ -2089,10 +2157,13 @@ LAB_IMPLEMENT_BASIC_FUNCTION(atan,atan)
 LAB_IMPLEMENT_BASIC_FUNCTION(tanh,tanh)
 LAB_IMPLEMENT_BASIC_FUNCTION_VALUE(pow,pow)
 LAB_IMPLEMENT_BASIC_FUNCTION(sqrt,sqrt)
+LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_rsqrt)
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,ceil)
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,floor)
 LAB_IMPLEMENT_BASIC_FUNCTION(round,round)
 LAB_IMPLEMENT_BASIC_FUNCTION(abs,fabs)
+LAB_IMPLEMENT_BASIC_FUNCTION(trunc,trunc)
+LAB_IMPLEMENT_BASIC_FUNCTION(frac,TH_frac)
 LAB_IMPLEMENT_BASIC_FUNCTION(neg,-)
 LAB_IMPLEMENT_BASIC_FUNCTION(cinv, 1.0 / )
 
@@ -2100,6 +2171,13 @@ void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
 {
   THTensor_(resizeAs)(r_, tx);
   TH_TENSOR_APPLY3(real, r_, real, tx, real, ty, *r__data = atan2(*tx_data,*ty_data););
+}
+
+void THTensor_(lerp)(THTensor *r_, THTensor *a, THTensor *b, real weight)
+{
+  THArgCheck(THTensor_(nElement)(a) == THTensor_(nElement)(b), 2, "sizes do not match");
+  THTensor_(resizeAs)(r_, a);
+  TH_TENSOR_APPLY3(real, r_, real, a, real, b, *r__data = TH_lerp(*a_data, *b_data, weight););
 }
 
 void THTensor_(mean)(THTensor *r_, THTensor *t, int dimension)
@@ -2334,9 +2412,10 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, long n)
   real i = 0;
 
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
-  THArgCheck(a <= b, 2, "end range should be greater than start range");
 
-  THTensor_(resize1d)(r_, n);
+  if (THTensor_(nElement)(r_) != n) {
+    THTensor_(resize1d)(r_, n);
+  }
 
   if(n == 1) {
      TH_TENSOR_APPLY(real, r_,
@@ -2356,9 +2435,11 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, long n)
   real i = 0;
 
   THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
-  THArgCheck(a <= b, 2, "end range should be greater than start range");
 
-  THTensor_(resize1d)(r_, n);
+  if (THTensor_(nElement)(r_) != n) {
+    THTensor_(resize1d)(r_, n);
+  }
+
   if(n == 1) {
     TH_TENSOR_APPLY(real, r_,
         *r__data = pow(10.0, a);

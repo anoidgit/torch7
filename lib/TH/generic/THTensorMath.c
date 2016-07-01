@@ -385,6 +385,14 @@ accreal THTensor_(dot)(THTensor *tensor, THTensor *src)
   return sum;
 }
 
+#undef th_isnan
+#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
+#define th_isnan(val) \
+if (isnan(value)) break;
+#else
+#define th_isnan(val)
+#endif
+
 real THTensor_(minall)(THTensor *tensor)
 {
   real theMin;
@@ -398,10 +406,7 @@ real THTensor_(minall)(THTensor *tensor)
                   if(!(value >= theMin))
                   {
                     theMin = value;
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-                    if (isnan(value))
-                      break;
-#endif
+                    th_isnan(value)
                   });
   return theMin;
 }
@@ -419,10 +424,7 @@ real THTensor_(maxall)(THTensor *tensor)
                   if(!(value <= theMax))
                   {
                     theMax = value;
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-                    if (isnan(value))
-                      break;
-#endif
+                    th_isnan(value)
                   });
   return theMax;
 }
@@ -841,8 +843,9 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   {
     transpose_r = 'n';
 
-    r__ = THTensor_(newWithSize2d)(r_->size[1], r_->size[0]);
-    THTensor_(copy)(r__, r_);
+    THTensor *transp_r_ = THTensor_(newTranspose)(r_, 0, 1);
+    r__ = THTensor_(newClone)(transp_r_);
+    THTensor_(free)(transp_r_);
     THTensor_(transpose)(r__, NULL, 0, 1);
   }
 
@@ -1078,10 +1081,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                          {
                            theIndex = i;
                            theMax = value;
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-                           if (isnan(value))
-                             break;
-#endif
+                           th_isnan(value)
                          }
                        }
                        *indices__data = theIndex;
@@ -1117,10 +1117,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
                          {
                            theIndex = i;
                            theMin = value;
-#if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
-                           if (isnan(value))
-                             break;
-#endif
+                           th_isnan(value)
                          }
                        }
                        *indices__data = theIndex;
